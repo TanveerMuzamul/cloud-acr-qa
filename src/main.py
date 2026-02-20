@@ -3,6 +3,8 @@ import json
 import os
 from datetime import datetime
 
+import pydicom
+
 from .logger_setup import setup_logger
 from .read_dicom import find_dicom_files, load_dicom_headers
 from .group_series import group_dicoms_by_series, summarize_series
@@ -29,7 +31,7 @@ def run_pipeline(data_folder: str, tolerances_path: str, report_path: str):
     # Find all files
     all_files = find_dicom_files(data_folder)
 
-    # Load DICOM headers
+    # Load DICOM headers only
     datasets = load_dicom_headers(all_files)
 
     if not datasets:
@@ -48,22 +50,25 @@ def run_pipeline(data_folder: str, tolerances_path: str, report_path: str):
     # Validate slice counts
     slice_validation = validate_slice_counts(series_summaries, tolerances)
 
-    # -----------------------------
+    # --------------------------------
     # Uniformity (PIU) calculation
-    # -----------------------------
+    # --------------------------------
     uniformity_results = []
 
     for uid, items in grouped.items():
         ds0 = items[0][1]
         desc = getattr(ds0, "SeriesDescription", "N/A")
 
-        # Apply only to T1 series
+        # Only calculate for T1 series
         if "T1" in desc:
             middle_index = len(items) // 2
-            ds_middle = items[middle_index][1]
+            middle_path = items[middle_index][0]
 
             try:
-                pixel_array = ds_middle.pixel_array
+                # Read full DICOM (including pixel data)
+                ds_full = pydicom.dcmread(middle_path)
+                pixel_array = ds_full.pixel_array
+
                 piu_value = calculate_piu(pixel_array)
 
                 uniformity_results.append({
@@ -72,7 +77,9 @@ def run_pipeline(data_folder: str, tolerances_path: str, report_path: str):
                     "PIU": piu_value,
                     "status": "PASS" if piu_value >= 80 else "FAIL"
                 })
-            except Exception:
+
+            except Exception as e:
+                print("Uniformity calculation failed:", e)
                 continue
 
     # Build report
