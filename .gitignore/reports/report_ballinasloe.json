@@ -1,0 +1,19 @@
+{
+    "report_generated": "2026-02-20T17:59:26.994536",
+    "dataset": "ballinasloe",
+    "study_metadata": {
+        "StudyDate": "20190520",
+        "StudyDescription": "N/A",
+        "Manufacturer": "GE MEDICAL SYSTEMS",
+        "ModelName": "SIGNA Voyager",
+        "MagneticFieldStrength": 1.5
+    },
+    "series_slice_counts": {
+        "3-Plane Localizer": 3,
+        "SAG T1 SE": 22
+    },
+    "qa_results": {
+        "slice_count_check": "PARTIAL (rules not applied yet)",
+        "metrics": []
+    }
+}
