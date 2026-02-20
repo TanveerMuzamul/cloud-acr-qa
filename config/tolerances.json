@@ -1,0 +1,7 @@
+{
+  "slice_counts": {
+    "3-Plane Localizer": 3,
+    "SAG T1 SE": 11
+  },
+  "piu_threshold": 80
+}

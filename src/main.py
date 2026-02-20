@@ -1,141 +1,130 @@
+from __future__ import annotations
+
 import argparse
 import json
-import os
 from datetime import datetime
-
-import pydicom
+from pathlib import Path
+from typing import Any
 
 from .logger_setup import setup_logger
-from .read_dicom import find_dicom_files, load_dicom_headers
-from .group_series import group_dicoms_by_series, summarize_series
+from .read_dicom import find_dicom_files, read_study_metadata
+from .group_series import group_dicoms_by_series_uid
 from .validate_slices import validate_slice_counts
-from .generate_report import extract_study_metadata, save_report
-from .metrics.uniformity import calculate_piu
+
+from .metrics.uniformity import calculate_piu_for_series
+from .metrics.snr import calculate_snr
 
 
-def load_tolerances(path: str) -> dict:
-    if not os.path.exists(path):
-        return {}
+LOGGER = setup_logger()
+
+
+def load_tolerances(tolerances_path: str | None) -> dict[str, Any]:
+    """
+    Load tolerances from config JSON, or return defaults if not provided.
+    """
+    defaults = {
+        "slice_counts": {
+            "3-Plane Localizer": 3,
+            "SAG T1 SE": 11,
+        },
+        "piu_threshold": 80,
+        "snr_threshold": 50,
+    }
+
+    if not tolerances_path:
+        return defaults
+
+    path = Path(tolerances_path)
+    if not path.exists():
+        return defaults
+
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        cfg = json.load(f)
+
+    # merge defaults with cfg (cfg overrides)
+    merged = defaults.copy()
+    merged.update(cfg)
+    merged["slice_counts"] = {**defaults.get("slice_counts", {}), **cfg.get("slice_counts", {})}
+    return merged
 
 
-def dataset_name_from_path(path: str) -> str:
-    return os.path.basename(os.path.normpath(path))
+def run_pipeline(data_folder: str, tolerances_path: str | None, report_path: str) -> dict[str, Any]:
+    LOGGER.info("Starting ACR QA Pipeline")
 
+    dicom_files = find_dicom_files(data_folder)
+    if not dicom_files:
+        raise FileNotFoundError(f"No DICOM files found in: {data_folder}")
 
-def run_pipeline(data_folder: str, tolerances_path: str, report_path: str):
-    logger = setup_logger("logs/pipeline.log")
-    logger.info("Starting ACR QA Pipeline")
-
-    # Find all files
-    all_files = find_dicom_files(data_folder)
-
-    # Load DICOM headers only
-    datasets = load_dicom_headers(all_files)
-
-    if not datasets:
-        logger.error("No DICOM files found. Check the data folder path.")
-        raise SystemExit(1)
-
-    # Group by series
-    grouped = group_dicoms_by_series(datasets)
-
-    # Create series summary
-    series_summaries = summarize_series(grouped)
-
-    # Load tolerance rules
     tolerances = load_tolerances(tolerances_path)
 
-    # Validate slice counts
-    slice_validation = validate_slice_counts(series_summaries, tolerances)
+    study_meta = read_study_metadata(dicom_files[0])
+    series_list = group_dicoms_by_series_uid(dicom_files)
 
-    # --------------------------------
-    # Uniformity (PIU) calculation
-    # --------------------------------
-    uniformity_results = []
+    # Slice validation
+    expected_slice_counts = tolerances.get("slice_counts", {})
+    slice_validation = validate_slice_counts(series_list, expected_slice_counts)
 
-    for uid, items in grouped.items():
-        ds0 = items[0][1]
-        desc = getattr(ds0, "SeriesDescription", "N/A")
+    # Metrics
+    metrics_results: list[dict[str, Any]] = []
 
-        # Only calculate for T1 series
+    piu_threshold = float(tolerances.get("piu_threshold", 80))
+    snr_threshold = float(tolerances.get("snr_threshold", 50))
+
+    for series in series_list:
+        desc = series.get("SeriesDescription", "")
+        # Only calculate PIU for T1 series (example rule)
         if "T1" in desc:
-            middle_index = len(items) // 2
-            middle_path = items[middle_index][0]
+            metrics_results.append(calculate_piu_for_series(series, piu_threshold=piu_threshold))
 
-            try:
-                # Read full DICOM (including pixel data)
-                ds_full = pydicom.dcmread(middle_path)
-                pixel_array = ds_full.pixel_array
-
-                piu_value = calculate_piu(pixel_array)
-
-                uniformity_results.append({
-                    "SeriesDescription": desc,
-                    "SeriesInstanceUID": uid,
-                    "PIU": piu_value,
-                    "status": "PASS" if piu_value >= 80 else "FAIL"
-                })
-
-            except Exception as e:
-                print("Uniformity calculation failed:", e)
-                continue
-
-    # Build report
-    dataset = dataset_name_from_path(data_folder)
+        # SNR placeholder (optional later)
+        # metrics_results.append(calculate_snr(series, snr_threshold=snr_threshold))
 
     report = {
         "report_generated": datetime.now().isoformat(),
-        "dataset": dataset,
-        "data_folder": data_folder,
-        "study_metadata": extract_study_metadata(datasets),
-        "series": series_summaries,
+        "dataset": Path(data_folder).name,
+        "data_folder": str(data_folder),
+        "study_metadata": study_meta,
+        "series": [
+            {
+                "SeriesInstanceUID": s["SeriesInstanceUID"],
+                "SeriesDescription": s["SeriesDescription"],
+                "slice_count": s["slice_count"],
+                "instance_range": list(s["instance_range"]),
+            }
+            for s in series_list
+        ],
         "qa_results": {
             "slice_count_validation": slice_validation,
-            "metrics": uniformity_results
-        }
+            "metrics": metrics_results,
+        },
     }
 
-    save_report(report, report_path)
-    logger.info("Report generated successfully")
+    Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=4)
 
-    print(f"\n✅ Report created: {report_path}\n")
-    print("Pipeline finished successfully.")
+    LOGGER.info("Report generated successfully")
+    return report
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ACR MRI QA pipeline")
-    parser.add_argument(
-        "--data",
-        required=True,
-        help="Path to dataset folder (example: data\\ballinasloe)"
-    )
-    parser.add_argument(
-        "--tolerances",
-        default="config/tolerances.json",
-        help="Tolerances JSON path"
-    )
-    parser.add_argument(
-        "--out",
-        default="",
-        help="Output report path"
-    )
-
+    parser = argparse.ArgumentParser(description="ACR QA Pipeline")
+    parser.add_argument("--data", required=True, help="Path to dataset folder (example: data\\ballinasloe)")
+    parser.add_argument("--tolerances", required=False, default=None, help="Path to tolerances JSON (optional)")
+    parser.add_argument("--out", required=False, default=None, help="Output report path (optional)")
     args = parser.parse_args()
 
     data_folder = args.data
-    dataset = dataset_name_from_path(data_folder)
+    out_path = args.out
 
-    out_path = args.out.strip()
     if not out_path:
-        out_path = f"reports/report_{dataset}.json"
+        dataset_name = Path(data_folder).name
+        out_path = str(Path("reports") / f"report_{dataset_name}.json")
 
-    run_pipeline(
-        data_folder=data_folder,
-        tolerances_path=args.tolerances,
-        report_path=out_path
-    )
+    report = run_pipeline(data_folder=data_folder, tolerances_path=args.tolerances, report_path=out_path)
+
+    print(f"\n✅ Report created: {out_path}\n")
+    print("Pipeline finished successfully.")
 
 
 if __name__ == "__main__":

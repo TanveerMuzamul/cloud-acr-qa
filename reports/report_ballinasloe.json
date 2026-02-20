@@ -1,6 +1,7 @@
 {
-    "report_generated": "2026-02-20T17:59:26.994536",
+    "report_generated": "2026-02-20T20:13:48.223761",
     "dataset": "ballinasloe",
+    "data_folder": "data\\ballinasloe",
     "study_metadata": {
         "StudyDate": "20190520",
         "StudyDescription": "N/A",
@@ -8,12 +9,72 @@
         "ModelName": "SIGNA Voyager",
         "MagneticFieldStrength": 1.5
     },
-    "series_slice_counts": {
-        "3-Plane Localizer": 3,
-        "SAG T1 SE": 22
-    },
+    "series": [
+        {
+            "SeriesInstanceUID": "1.2.840.113619.2.408.14196467.3447869.19010.1558335996.622",
+            "SeriesDescription": "3-Plane Localizer",
+            "slice_count": 3,
+            "instance_range": [
+                1,
+                3
+            ]
+        },
+        {
+            "SeriesInstanceUID": "1.2.840.113619.2.408.14196467.3447869.19010.1558335996.626",
+            "SeriesDescription": "SAG T1 SE",
+            "slice_count": 11,
+            "instance_range": [
+                1,
+                11
+            ]
+        },
+        {
+            "SeriesInstanceUID": "1.2.840.113619.2.408.14196467.3447869.19010.1558335996.629",
+            "SeriesDescription": "SAG T1 SE",
+            "slice_count": 11,
+            "instance_range": [
+                1,
+                11
+            ]
+        }
+    ],
     "qa_results": {
-        "slice_count_check": "PARTIAL (rules not applied yet)",
-        "metrics": []
+        "slice_count_validation": [
+            {
+                "SeriesDescription": "3-Plane Localizer",
+                "SeriesInstanceUID": "1.2.840.113619.2.408.14196467.3447869.19010.1558335996.622",
+                "actual": 3,
+                "expected": 3,
+                "status": "PASS"
+            },
+            {
+                "SeriesDescription": "SAG T1 SE",
+                "SeriesInstanceUID": "1.2.840.113619.2.408.14196467.3447869.19010.1558335996.626",
+                "actual": 11,
+                "expected": 11,
+                "status": "PASS"
+            },
+            {
+                "SeriesDescription": "SAG T1 SE",
+                "SeriesInstanceUID": "1.2.840.113619.2.408.14196467.3447869.19010.1558335996.629",
+                "actual": 11,
+                "expected": 11,
+                "status": "PASS"
+            }
+        ],
+        "metrics": [
+            {
+                "SeriesDescription": "SAG T1 SE",
+                "SeriesInstanceUID": "1.2.840.113619.2.408.14196467.3447869.19010.1558335996.626",
+                "PIU": 2.18,
+                "status": "FAIL"
+            },
+            {
+                "SeriesDescription": "SAG T1 SE",
+                "SeriesInstanceUID": "1.2.840.113619.2.408.14196467.3447869.19010.1558335996.629",
+                "PIU": 1.7,
+                "status": "FAIL"
+            }
+        ]
     }
 }

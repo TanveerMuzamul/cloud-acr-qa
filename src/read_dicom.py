@@ -1,30 +1,51 @@
-import os
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
 import pydicom
 
-# Path to your DICOM data
-DICOM_FOLDER = "../data/ballinasloe"
 
-def load_dicom_files(folder_path):
-    dicom_files = []
+def find_dicom_files(data_folder: str) -> list[str]:
+    """
+    Find all DICOM files under the given data_folder.
+    We consider .dcm files + also include files with no extension that are DICOM.
+    """
+    root = Path(data_folder)
+    if not root.exists():
+        return []
 
-    for root, dirs, files in os.walk(folder_path):
-        for file in files:
-            if file.lower().endswith(".dcm"):
-                dicom_files.append(os.path.join(root, file))
+    dicom_files: list[str] = []
 
-    return dicom_files
+    # Common: .dcm
+    dicom_files.extend([str(p) for p in root.rglob("*.dcm")])
+
+    # Some datasets have DICOM with no extension; try to detect a few
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix == "" and p.name.upper() != "DICOMDIR":
+            try:
+                pydicom.dcmread(str(p), stop_before_pixels=True)
+                dicom_files.append(str(p))
+            except Exception:
+                pass
+
+    return sorted(list(set(dicom_files)))
 
 
-if __name__ == "__main__":
-    files = load_dicom_files(DICOM_FOLDER)
+def read_study_metadata(first_dicom_file: str) -> dict[str, Any]:
+    """
+    Read basic metadata from the first DICOM file.
+    """
+    ds = pydicom.dcmread(first_dicom_file, stop_before_pixels=True)
 
-    print(f"\nFound {len(files)} DICOM files\n")
+    def safe_get(name: str, default="N/A"):
+        return getattr(ds, name, default)
 
-    for file in files[:5]:  # show only first 5 files
-        ds = pydicom.dcmread(file)
-        print("File:", file)
-        print("Series Description:", getattr(ds, "SeriesDescription", "N/A"))
-        print("Instance Number:", getattr(ds, "InstanceNumber", "N/A"))
-        print("Rows:", getattr(ds, "Rows", "N/A"))
-        print("Columns:", getattr(ds, "Columns", "N/A"))
-        print("-" * 40)
+    meta = {
+        "StudyDate": safe_get("StudyDate"),
+        "StudyDescription": safe_get("StudyDescription"),
+        "Manufacturer": safe_get("Manufacturer"),
+        "ModelName": safe_get("ManufacturerModelName", safe_get("ModelName")),
+        "MagneticFieldStrength": safe_get("MagneticFieldStrength", None),
+    }
+    return meta

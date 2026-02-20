@@ -1,48 +1,34 @@
-import os
-import pydicom
-from collections import defaultdict
+from __future__ import annotations
+from typing import Any
 
-DICOM_FOLDER = "../data/ballinasloe"
 
-# For now only validating localizer count (from your dataset)
-EXPECTED_COUNTS_BY_DESCRIPTION = {
-    "3-Plane Localizer": 3
-}
+def validate_slice_counts(series_list: list[dict[str, Any]], expected_slice_counts: dict[str, int]) -> list[dict[str, Any]]:
+    """
+    Validate slice count per series by SeriesDescription.
+    expected_slice_counts example:
+      {"3-Plane Localizer": 3, "SAG T1 SE": 11}
+    """
+    results: list[dict[str, Any]] = []
 
-def find_dicom_files(folder_path):
-    dicom_files = []
-    for root, dirs, files in os.walk(folder_path):
-        for file in files:
-            if file.lower().endswith(".dcm"):
-                dicom_files.append(os.path.join(root, file))
-    return dicom_files
+    for s in series_list:
+        desc = s.get("SeriesDescription", "N/A")
+        uid = s.get("SeriesInstanceUID", "N/A")
+        actual = int(s.get("slice_count", 0))
+        expected = expected_slice_counts.get(desc)
 
-def count_by_series_uid(dicom_files):
-    series = defaultdict(lambda: {"desc": "NoDescription", "count": 0})
-
-    for file in dicom_files:
-        ds = pydicom.dcmread(file, stop_before_pixels=True)
-        uid = getattr(ds, "SeriesInstanceUID", "UNKNOWN_SERIES")
-        desc = getattr(ds, "SeriesDescription", "NoDescription")
-
-        series[uid]["desc"] = desc
-        series[uid]["count"] += 1
-
-    return series
-
-if __name__ == "__main__":
-    files = find_dicom_files(DICOM_FOLDER)
-    series = count_by_series_uid(files)
-
-    print("\nSlice count validation (per SeriesInstanceUID):\n")
-
-    for uid, info in series.items():
-        desc = info["desc"]
-        count = info["count"]
-
-        if desc in EXPECTED_COUNTS_BY_DESCRIPTION:
-            expected = EXPECTED_COUNTS_BY_DESCRIPTION[desc]
-            status = "PASS" if count == expected else "FAIL"
-            print(f"{desc} | UID={uid[-8:]} | slices={count} (expected {expected}) → {status}")
+        if expected is None:
+            status = "NO_RULE"
         else:
-            print(f"{desc} | UID={uid[-8:]} | slices={count} (no expected value set yet)")
+            status = "PASS" if actual == int(expected) else "FAIL"
+
+        results.append(
+            {
+                "SeriesDescription": desc,
+                "SeriesInstanceUID": uid,
+                "actual": actual,
+                "expected": expected,
+                "status": status,
+            }
+        )
+
+    return results

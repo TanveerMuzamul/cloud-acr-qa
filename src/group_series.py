@@ -1,48 +1,57 @@
-import os
-import pydicom
+from __future__ import annotations
+
 from collections import defaultdict
+from typing import Any
 
-DICOM_FOLDER = "../data/ballinasloe"
+import pydicom
 
-def find_dicom_files(folder_path):
-    dicom_files = []
-    for root, dirs, files in os.walk(folder_path):
-        for file in files:
-            if file.lower().endswith(".dcm"):
-                dicom_files.append(os.path.join(root, file))
-    return dicom_files
 
-def group_by_series(dicom_files):
-    series_map = defaultdict(list)
+def group_dicoms_by_series_uid(dicom_files: list[str]) -> list[dict[str, Any]]:
+    """
+    Groups DICOM files by SeriesInstanceUID.
+    Returns a list of series dictionaries.
+    """
+    series_map: dict[str, dict[str, Any]] = defaultdict(lambda: {"files": [], "SeriesDescription": "N/A"})
 
-    for file in dicom_files:
-        ds = pydicom.dcmread(file, stop_before_pixels=True)
-        series_uid = getattr(ds, "SeriesInstanceUID", "UNKNOWN_SERIES")
-        series_desc = getattr(ds, "SeriesDescription", "NoDescription")
+    for f in dicom_files:
+        try:
+            ds = pydicom.dcmread(f, stop_before_pixels=True)
+        except Exception:
+            continue
 
-        series_map[series_uid].append({
-            "file": file,
-            "desc": series_desc,
-            "instance": getattr(ds, "InstanceNumber", 0)
-        })
+        uid = getattr(ds, "SeriesInstanceUID", None)
+        if not uid:
+            continue
 
-    # sort each series by InstanceNumber
-    for uid in series_map:
-        series_map[uid] = sorted(series_map[uid], key=lambda x: x["instance"])
+        series_map[uid]["SeriesInstanceUID"] = uid
+        series_map[uid]["SeriesDescription"] = getattr(ds, "SeriesDescription", "N/A")
+        series_map[uid]["files"].append(f)
 
-    return series_map
+    series_list: list[dict[str, Any]] = []
 
-if __name__ == "__main__":
-    files = find_dicom_files(DICOM_FOLDER)
-    print(f"Found {len(files)} DICOM files\n")
+    def inst_num(path: str) -> int:
+        try:
+            ds = pydicom.dcmread(path, stop_before_pixels=True)
+            return int(getattr(ds, "InstanceNumber", 0) or 0)
+        except Exception:
+            return 0
 
-    series_map = group_by_series(files)
+    for uid, info in series_map.items():
+        files_sorted = sorted(info["files"], key=inst_num)
+        instance_numbers = [inst_num(p) for p in files_sorted]
+        if instance_numbers:
+            min_inst, max_inst = min(instance_numbers), max(instance_numbers)
+        else:
+            min_inst, max_inst = 0, 0
 
-    print(f"Found {len(series_map)} series:\n")
+        series_list.append(
+            {
+                "SeriesInstanceUID": uid,
+                "SeriesDescription": info.get("SeriesDescription", "N/A"),
+                "files": files_sorted,
+                "slice_count": len(files_sorted),
+                "instance_range": (min_inst, max_inst),
+            }
+        )
 
-    for uid, items in series_map.items():
-        desc = items[0]["desc"]
-        count = len(items)
-        first_inst = items[0]["instance"]
-        last_inst = items[-1]["instance"]
-        print(f"- {desc} | slices={count} | instance range={first_inst}..{last_inst}")
+    return series_list
