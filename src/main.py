@@ -8,6 +8,7 @@ from .read_dicom import find_dicom_files, load_dicom_headers
 from .group_series import group_dicoms_by_series, summarize_series
 from .validate_slices import validate_slice_counts
 from .generate_report import extract_study_metadata, save_report
+from .metrics.uniformity import calculate_piu
 
 
 def load_tolerances(path: str) -> dict:
@@ -25,30 +26,58 @@ def run_pipeline(data_folder: str, tolerances_path: str, report_path: str):
     logger = setup_logger("logs/pipeline.log")
     logger.info("Starting ACR QA Pipeline")
 
-    # collect all files under data folder
+    # Find all files
     all_files = find_dicom_files(data_folder)
 
-    # read dicom headers only
+    # Load DICOM headers
     datasets = load_dicom_headers(all_files)
 
     if not datasets:
         logger.error("No DICOM files found. Check the data folder path.")
         raise SystemExit(1)
 
-    # group by SeriesInstanceUID
+    # Group by series
     grouped = group_dicoms_by_series(datasets)
 
-    # summarize series
+    # Create series summary
     series_summaries = summarize_series(grouped)
 
-    # load tolerance rules
+    # Load tolerance rules
     tolerances = load_tolerances(tolerances_path)
 
-    # validate slice counts
+    # Validate slice counts
     slice_validation = validate_slice_counts(series_summaries, tolerances)
 
-    # report JSON
+    # -----------------------------
+    # Uniformity (PIU) calculation
+    # -----------------------------
+    uniformity_results = []
+
+    for uid, items in grouped.items():
+        ds0 = items[0][1]
+        desc = getattr(ds0, "SeriesDescription", "N/A")
+
+        # Apply only to T1 series
+        if "T1" in desc:
+            middle_index = len(items) // 2
+            ds_middle = items[middle_index][1]
+
+            try:
+                pixel_array = ds_middle.pixel_array
+                piu_value = calculate_piu(pixel_array)
+
+                uniformity_results.append({
+                    "SeriesDescription": desc,
+                    "SeriesInstanceUID": uid,
+                    "PIU": piu_value,
+                    "status": "PASS" if piu_value >= 80 else "FAIL"
+                })
+            except Exception:
+                continue
+
+    # Build report
     dataset = dataset_name_from_path(data_folder)
+
     report = {
         "report_generated": datetime.now().isoformat(),
         "dataset": dataset,
@@ -57,7 +86,7 @@ def run_pipeline(data_folder: str, tolerances_path: str, report_path: str):
         "series": series_summaries,
         "qa_results": {
             "slice_count_validation": slice_validation,
-            "metrics": []
+            "metrics": uniformity_results
         }
     }
 
@@ -69,7 +98,7 @@ def run_pipeline(data_folder: str, tolerances_path: str, report_path: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ACR MRI QA pipeline (basic)")
+    parser = argparse.ArgumentParser(description="ACR MRI QA pipeline")
     parser.add_argument(
         "--data",
         required=True,
@@ -83,8 +112,9 @@ def main():
     parser.add_argument(
         "--out",
         default="",
-        help="Output report path (default: reports/report_<dataset>.json)"
+        help="Output report path"
     )
+
     args = parser.parse_args()
 
     data_folder = args.data
